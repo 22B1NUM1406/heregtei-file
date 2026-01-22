@@ -28,7 +28,7 @@ setInterval(cleanupExpiredTokens, 60 * 1000);
 // ========== 1. Шууд татах (auth токеноор) ==========
 router.get('/pack', auth, async (req, res) => {
   try {
-    console.log(`📥 Download request from user: ${req.user.email}, paid: ${req.user.is_paid}`);
+    console.log(`📥 Download request from user: ${req.user.phone}, paid: ${req.user.is_paid}`);
     
     if (!req.user.is_paid) {
       return res.status(403).json({ 
@@ -64,7 +64,7 @@ router.get('/pack', auth, async (req, res) => {
           });
         }
       } else {
-        console.log(`✅ Файл амжилттай татлаа: ${req.user.email}`);
+        console.log(`✅ Файл амжилттай татлаа: ${req.user.phone}`);
       }
     });
 
@@ -80,7 +80,7 @@ router.get('/pack', auth, async (req, res) => {
 // ========== 2. Нэг удаагийн download link үүсгэх ==========
 router.post('/generate-link', auth, async (req, res) => {
   try {
-    console.log(`🔗 Generate link request from user: ${req.user.email}`);
+    console.log(`🔗 Generate link request from user: ${req.user.phone}`);
     
     if (!req.user.is_paid) {
       return res.status(403).json({ 
@@ -94,12 +94,12 @@ router.post('/generate-link', auth, async (req, res) => {
     
     tempTokens.set(downloadToken, {
       userId: req.user.id,
-      email: req.user.email,
+      phone: req.user.phone,
       expiresAt: expiresAt,
       createdAt: Date.now()
     });
 
-    console.log(`✅ Token үүсгэлээ: ${downloadToken.substring(0, 10)}... (user: ${req.user.email})`);
+    console.log(`✅ Token үүсгэлээ: ${downloadToken.substring(0, 10)}... (user: ${req.user.phone})`);
 
     res.json({
       success: true,
@@ -183,7 +183,7 @@ router.get('/file/:token', async (req, res) => {
     }
 
     if (!user || !user.is_paid) {
-      console.log(`❌ Хэрэглэгч premium биш: ${tokenData.email}`);
+      console.log(`❌ Хэрэглэгч premium биш: ${tokenData.phone}`);
       return res.status(403).send(`
         <!DOCTYPE html>
         <html>
@@ -208,12 +208,12 @@ router.get('/file/:token', async (req, res) => {
     
     if (!fs.existsSync(filePath)) {
       // Test файл үүсгэх
-      const testContent = `Heregtei Premium Files Pack\n\nUser: ${tokenData.email}\nDownloaded at: ${new Date().toISOString()}\n`;
+      const testContent = `Heregtei Premium Files Pack\n\nUser: ${tokenData.phone}\nDownloaded at: ${new Date().toISOString()}\n`;
       fs.writeFileSync(filePath, testContent);
       console.log(`📝 Test файл үүсгэлээ: ${filePath}`);
     }
 
-    console.log(`✅ Downloading file for user: ${tokenData.email}`);
+    console.log(`✅ Downloading file for user: ${tokenData.phone}`);
 
     // Token устгах
     tempTokens.delete(token);
@@ -242,7 +242,7 @@ router.get('/file/:token', async (req, res) => {
           `);
         }
       } else {
-        console.log(`🎉 File downloaded successfully for: ${tokenData.email}`);
+        console.log(`🎉 File downloaded successfully for: ${tokenData.phone}`);
       }
     });
 
@@ -282,7 +282,7 @@ router.get('/debug', auth, (req, res) => {
     const activeTokens = Array.from(tempTokens.entries()).map(([token, data]) => ({
       token: token.substring(0, 10) + '...',
       userId: data.userId,
-      email: data.email,
+      phone: data.phone,
       expiresAt: new Date(data.expiresAt).toLocaleString(),
       timeLeft: Math.max(0, Math.floor((data.expiresAt - Date.now()) / 1000))
     }));
@@ -290,7 +290,7 @@ router.get('/debug', auth, (req, res) => {
     res.json({
       user: {
         id: req.user.id,
-        email: req.user.email,
+        phone: req.user.phone,
         is_paid: req.user.is_paid,
         paid_at: req.user.paid_at
       },

@@ -7,21 +7,21 @@ const { User } = require('../models');
 // Бүртгүүлэх
 router.post('/register', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { phone, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email болон password оруулна уу' });
+    if (!phone || !password) {
+      return res.status(400).json({ error: 'Утасны дугаар болон password оруулна уу' });
     }
 
-    const existingUser = await User.findOne({ where: { email } });
+    const existingUser = await User.findOne({ where: { phone } });
     if (existingUser) {
-      return res.status(400).json({ error: 'Email бүртгэлтэй байна' });
+      return res.status(400).json({ error: 'Утасны дугаар бүртгэлтэй байна' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({
-      email,
+      phone,
       password: hashedPassword
     });
 
@@ -33,7 +33,7 @@ router.post('/register', async (req, res) => {
       token,
       user: {
         id: user.id,
-        email: user.email,
+        phone: user.phone,
         is_paid: user.is_paid
       }
     });
@@ -47,16 +47,16 @@ router.post('/register', async (req, res) => {
 // Нэвтрэх
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { phone, password } = req.body;
 
-    const user = await User.findOne({ where: { email } });
+    const user = await User.findOne({ where: { phone } });
     if (!user) {
-      return res.status(401).json({ error: 'Email эсвэл password буруу' });
+      return res.status(401).json({ error: 'Утасны дугаар эсвэл password буруу' });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
-      return res.status(401).json({ error: 'Email эсвэл password буруу' });
+      return res.status(401).json({ error: 'Утасны дугаар эсвэл password буруу' });
     }
 
     const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
@@ -67,7 +67,7 @@ router.post('/login', async (req, res) => {
       token,
       user: {
         id: user.id,
-        email: user.email,
+        phone: user.phone,
         is_paid: user.is_paid
       }
     });
