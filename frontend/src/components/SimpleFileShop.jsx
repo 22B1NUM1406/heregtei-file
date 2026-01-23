@@ -39,7 +39,7 @@ export default function SimpleFileShop() {
   const [formError, setFormError] = useState('');
   const [debugInfo, setDebugInfo] = useState(null);
 
-  const API_URL = 'http://localhost:3000/api';
+  const API_URL = '/api';  // http://localhost:3000/api биш!
 
   // Захиалга үүсгэх
   const handleFormSubmit = async () => {

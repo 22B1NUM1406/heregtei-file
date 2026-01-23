@@ -17,17 +17,23 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ✅ STATIC FILES - Frontend болон Admin-ийг serve хийх
-// Production дээр эдгээр folder-ууд байх ёстой
+// ✅ STATIC FILES - Frontend болон Admin serve хийх
+// Production дээр build хийсэн файлуудыг serve хийнэ
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'frontend/dist')));
-  app.use('/admin', express.static(path.join(__dirname, 'admin/dist')));
-  console.log('📦 Static files serving enabled');
+  // Frontend (public facing)
+  app.use(express.static(path.join(__dirname, '../frontend/dist')));
+  
+  // Admin panel
+  app.use('/admin', express.static(path.join(__dirname, '../admin/dist')));
+  
+  console.log('📦 Static files enabled');
+  console.log('   Frontend:', path.join(__dirname, '../frontend/dist'));
+  console.log('   Admin:', path.join(__dirname, '../admin/dist'));
 }
 
 // SQLite Database
 const dbPath = process.env.NODE_ENV === 'production' 
-  ? '/opt/render/project/src/data/database.db'  // Render.com Persistent Disk
+  ? '/opt/render/project/src/data/database.db'  // Render Persistent Disk
   : './database.db';
 
 const db = new sqlite3.Database(dbPath);
@@ -55,7 +61,7 @@ db.serialize(() => {
     } else {
       console.log('✅ Database бэлэн боллоо:', dbPath);
       
-      // payment_verified талбар байгаа эсэхийг шалгаад байхгүй бол нэмэх
+      // payment_verified талбар байгаа эсэхийг шалгах
       db.run(`
         ALTER TABLE orders ADD COLUMN payment_verified INTEGER DEFAULT 0
       `, (alterErr) => {
@@ -169,6 +175,7 @@ app.get('/api/download/:orderId', (req, res) => {
       
       res.download(filePath, `Хэрэгтэй-Файл-${order.order_id}.zip`, (err) => {
         if (err) {
+          console.error('Download error:', err);
           res.status(500).json({ 
             success: false,
             error: 'Файл татахад алдаа гарлаа' 
@@ -207,7 +214,7 @@ app.get('/api/admin/orders', (req, res) => {
   });
 });
 
-// 5. Захиалгыг баталгаажуулах (ADMIN)
+// 5. Захиалгыг баталгаажуулах
 app.post('/api/admin/orders/:orderId/verify', (req, res) => {
   const { orderId } = req.params;
   const { adminName = 'Админ', notes = 'Админаар баталгаажсан' } = req.body;
@@ -240,7 +247,7 @@ app.post('/api/admin/orders/:orderId/verify', (req, res) => {
         });
       }
 
-      console.log(`✅ Амжилттай баталгаажлаа: ${orderId} (${this.changes} өөрчлөлт)`);
+      console.log(`✅ Амжилттай баталгаажлаа: ${orderId}`);
       
       res.json({
         success: true,
@@ -308,40 +315,39 @@ app.get('/api/admin/stats', (req, res) => {
   );
 });
 
-// ✅ FRONTEND ROUTES - React Router-д зориулсан
-// API routes-аас өмнө бичсэн байх ёстой
-// Бүх бусад route-уудыг frontend руу чиглүүлнэ
+// ✅ FRONTEND ROUTES - React Router support
+// API routes-ын дараа бичих ёстой
 if (process.env.NODE_ENV === 'production') {
-  // Admin routes
+  // Admin panel routes
   app.get('/admin/*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'admin/dist/index.html'));
+    res.sendFile(path.join(__dirname, '../admin/dist/index.html'));
   });
 
-  // Frontend routes (бүх бусад)
+  // Frontend routes (catch-all)
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
+    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
   });
 }
 
 // ==================== SERVER START ====================
 
 app.listen(PORT, () => {
-  console.log(`🚀 Сервер эхэллээ: http://localhost:${PORT}`);
+  console.log(`\n🚀 Сервер эхэллээ: http://localhost:${PORT}`);
   
   if (process.env.NODE_ENV === 'production') {
-    console.log(`📱 Frontend: http://localhost:${PORT}`);
-    console.log(`👤 Admin: http://localhost:${PORT}/admin`);
+    console.log(`📱 Frontend:  http://localhost:${PORT}`);
+    console.log(`👤 Admin:     http://localhost:${PORT}/admin`);
   }
   
-  console.log(`📊 API эндпоинтууд:`);
+  console.log(`\n📊 API эндпоинтууд:`);
   console.log(`   POST /api/orders - Захиалга үүсгэх`);
   console.log(`   GET /api/orders/:id - Төлөв шалгах`);
   console.log(`   GET /api/download/:id - Файл татах`);
-  console.log(`   GET /api/admin/orders - Админ: бүх захиалга`);
+  console.log(`   GET /api/admin/orders - Админ: захиалгууд`);
   console.log(`   POST /api/admin/orders/:id/verify - Админ: баталгаажуулах`);
   console.log(`   POST /api/admin/orders/:id/reject - Админ: татгалзах`);
   console.log(`\n💰 Төлбөрийн мэдээлэл:`);
   console.log(`   Данс: 5063 3291 06`);
-  console.log(`   Банс: Хаан Банк`);
-  console.log(`   Дүн: 50,000₮`);
+  console.log(`   Банк: Хаан Банк`);
+  console.log(`   Дүн: 50,000₮\n`);
 });

@@ -55,7 +55,7 @@ export default function AdminDashboard() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  const API_URL = 'http://localhost:3000/api';
+  const API_URL = '/api';;
 
   // Firebase Auth state listener
 // Firebase Auth state listener
