@@ -319,9 +319,7 @@ app.get('/api/admin/stats', (req, res) => {
 // API routes-ын дараа бичих ёстой
 if (process.env.NODE_ENV === 'production') {
   // Admin panel routes
-  app.get('/admin/*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../admin/dist/index.html'));
-  });
+ 
 
   // Frontend routes (catch-all)
   app.get('*', (req, res) => {
