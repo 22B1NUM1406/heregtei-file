@@ -17,14 +17,23 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// SQLite Database
-const db = new sqlite3.Database('./database.db');
+// ✅ STATIC FILES - Frontend болон Admin-ийг serve хийх
+// Production дээр эдгээр folder-ууд байх ёстой
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'frontend/dist')));
+  app.use('/admin', express.static(path.join(__dirname, 'admin/dist')));
+  console.log('📦 Static files serving enabled');
+}
 
-// Database Setup - ШИНЭЧЛЭЛТ: payment_verified талбар нэмэх
+// SQLite Database
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? '/opt/render/project/src/data/database.db'  // Render.com Persistent Disk
+  : './database.db';
+
+const db = new sqlite3.Database(dbPath);
+
+// Database Setup
 db.serialize(() => {
-  // Хуучин хүснэгтийг устгаад шинээр үүсгэх (хөгжүүлэлтийн үед)
-  // Эсвэл ALTER TABLE ашиглах (production-д)
-  
   db.run(`
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +53,7 @@ db.serialize(() => {
     if (err) {
       console.error('❌ Хүснэгт үүсгэх алдаа:', err);
     } else {
-      console.log('✅ Database бэлэн боллоо');
+      console.log('✅ Database бэлэн боллоо:', dbPath);
       
       // payment_verified талбар байгаа эсэхийг шалгаад байхгүй бол нэмэх
       db.run(`
@@ -109,7 +118,7 @@ app.post('/api/orders', (req, res) => {
   );
 });
 
-// 2. Захиалгын төлөв шалгах - ШИНЭЧЛЭЛТ
+// 2. Захиалгын төлөв шалгах
 app.get('/api/orders/:orderId', (req, res) => {
   const { orderId } = req.params;
 
@@ -124,12 +133,11 @@ app.get('/api/orders/:orderId', (req, res) => {
         });
       }
 
-      // ✅ ЧУХАЛ: payment_verified талбарыг заавал буцаах
       res.json({
         success: true,
         order_id: order.order_id,
         status: order.status,
-        payment_verified: order.payment_verified || 0, // ✅ Энэ талбар ЗААВАЛ байх ёстой
+        payment_verified: order.payment_verified || 0,
         name: order.name,
         email: order.email,
         phone: order.phone,
@@ -142,7 +150,7 @@ app.get('/api/orders/:orderId', (req, res) => {
   );
 });
 
-// 3. Файл татах - payment_verified шалгах
+// 3. Файл татах
 app.get('/api/download/:orderId', (req, res) => {
   const { orderId } = req.params;
 
@@ -195,12 +203,11 @@ app.get('/api/admin/orders', (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Алдаа гарлаа' });
     }
-
     res.json({ orders });
   });
 });
 
-// 5. Захиалгыг баталгаажуулах (ADMIN) - ✅ ШИНЭЧЛЭЛТ
+// 5. Захиалгыг баталгаажуулах (ADMIN)
 app.post('/api/admin/orders/:orderId/verify', (req, res) => {
   const { orderId } = req.params;
   const { adminName = 'Админ', notes = 'Админаар баталгаажсан' } = req.body;
@@ -296,16 +303,36 @@ app.get('/api/admin/stats', (req, res) => {
       if (err) {
         return res.status(500).json({ error: 'Алдаа гарлаа' });
       }
-
       res.json({ stats: stats[0] });
     }
   );
 });
 
+// ✅ FRONTEND ROUTES - React Router-д зориулсан
+// API routes-аас өмнө бичсэн байх ёстой
+// Бүх бусад route-уудыг frontend руу чиглүүлнэ
+if (process.env.NODE_ENV === 'production') {
+  // Admin routes
+  app.get('/admin/*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin/dist/index.html'));
+  });
+
+  // Frontend routes (бүх бусад)
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'frontend/dist/index.html'));
+  });
+}
+
 // ==================== SERVER START ====================
 
 app.listen(PORT, () => {
   console.log(`🚀 Сервер эхэллээ: http://localhost:${PORT}`);
+  
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`📱 Frontend: http://localhost:${PORT}`);
+    console.log(`👤 Admin: http://localhost:${PORT}/admin`);
+  }
+  
   console.log(`📊 API эндпоинтууд:`);
   console.log(`   POST /api/orders - Захиалга үүсгэх`);
   console.log(`   GET /api/orders/:id - Төлөв шалгах`);
@@ -315,6 +342,6 @@ app.listen(PORT, () => {
   console.log(`   POST /api/admin/orders/:id/reject - Админ: татгалзах`);
   console.log(`\n💰 Төлбөрийн мэдээлэл:`);
   console.log(`   Данс: 5063 3291 06`);
-  console.log(`   Банк: Хаан Банк`);
+  console.log(`   Банс: Хаан Банк`);
   console.log(`   Дүн: 50,000₮`);
 });

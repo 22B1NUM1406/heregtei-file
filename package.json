@@ -1,0 +1,21 @@
+{
+  "name": "heregtei_file",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend",
+    "start": "npm run start --prefix backend"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/22B1NUM1406/heregtei-file.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/22B1NUM1406/heregtei-file/issues"
+  },
+  "homepage": "https://github.com/22B1NUM1406/heregtei-file#readme"
+}
