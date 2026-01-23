@@ -1,14 +1,17 @@
-// server.js - Express Backend
-const express = require('express');
-const cors = require('cors');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
+import express from 'express';
+import cors from 'cors';
+import sqlite3 from 'sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3000;
-const JWT_SECRET = 'your-secret-key-change-this'; // Энэ заавал өөрчил!
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
@@ -17,9 +20,11 @@ app.use(express.json());
 // SQLite Database
 const db = new sqlite3.Database('./database.db');
 
-// Database Setup
+// Database Setup - ШИНЭЧЛЭЛТ: payment_verified талбар нэмэх
 db.serialize(() => {
-  // Захиалгын хүснэгт
+  // Хуучин хүснэгтийг устгаад шинээр үүсгэх (хөгжүүлэлтийн үед)
+  // Эсвэл ALTER TABLE ашиглах (production-д)
+  
   db.run(`
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,31 +32,30 @@ db.serialize(() => {
       name TEXT NOT NULL,
       phone TEXT NOT NULL,
       email TEXT NOT NULL,
-      amount INTEGER DEFAULT 49900,
       status TEXT DEFAULT 'pending',
-      payment_verified BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      paid_at DATETIME,
-      verified_by TEXT
+      verified_at DATETIME,
+      verified_by TEXT,
+      notes TEXT,
+      payment_verified INTEGER DEFAULT 0,
+      amount INTEGER DEFAULT 50000
     )
-  `);
-
-  // Админы хүснэгт (төлбөр баталгаажуулах)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS admins (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Анхны админ үүсгэх (username: admin, password: admin123)
-  const defaultAdminPassword = bcrypt.hashSync('admin123', 10);
-  db.run(
-    `INSERT OR IGNORE INTO admins (username, password_hash) VALUES (?, ?)`,
-    ['admin', defaultAdminPassword]
-  );
+  `, (err) => {
+    if (err) {
+      console.error('❌ Хүснэгт үүсгэх алдаа:', err);
+    } else {
+      console.log('✅ Database бэлэн боллоо');
+      
+      // payment_verified талбар байгаа эсэхийг шалгаад байхгүй бол нэмэх
+      db.run(`
+        ALTER TABLE orders ADD COLUMN payment_verified INTEGER DEFAULT 0
+      `, (alterErr) => {
+        if (alterErr && !alterErr.message.includes('duplicate column')) {
+          console.error('⚠️ ALTER алдаа:', alterErr.message);
+        }
+      });
+    }
+  });
 });
 
 // ==================== PUBLIC API ====================
@@ -61,17 +65,24 @@ app.post('/api/orders', (req, res) => {
   const { name, phone, email } = req.body;
 
   if (!name || !phone || !email) {
-    return res.status(400).json({ error: 'Бүх талбарыг бөглөнө үү' });
+    return res.status(400).json({ 
+      success: false,
+      error: 'Бүх талбарыг бөглөнө үү' 
+    });
   }
 
   const orderId = `ORD${Date.now()}`;
 
   db.run(
     `INSERT INTO orders (order_id, name, phone, email) VALUES (?, ?, ?, ?)`,
-    [orderId, name, phone, email],
+    [orderId, name.trim(), phone.trim(), email.trim()],
     function(err) {
       if (err) {
-        return res.status(500).json({ error: 'Захиалга үүсгэхэд алдаа гарлаа' });
+        console.error('Database error:', err);
+        return res.status(500).json({ 
+          success: false,
+          error: 'Захиалга үүсгэхэд алдаа гарлаа' 
+        });
       }
 
       res.json({
@@ -79,17 +90,18 @@ app.post('/api/orders', (req, res) => {
         order: {
           id: this.lastID,
           order_id: orderId,
-          name,
-          phone,
-          email,
-          amount: 49900,
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
           status: 'pending',
+          payment_verified: 0,
           bank_info: {
-            accountNumber: '5456 7890 1234 5678',
-            bank: 'Хас Банк',
-            accountName: 'Хэрэгтэй Файл ХХК',
-            amount: '49,900₮',
-            reference: orderId
+            accountNumber: '5063 3291 06',
+            bank: 'Хаан Банк',
+            accountName: 'Түвшинбаяр Энхбаатар',
+            amount: '50,000₮',
+            reference: 'утасны дугаараа',
+            note: 'Гүйлгээний утга дээр ДЭЭРХ УТАСНЫ ДУГААРАА бичнэ үү!'
           }
         }
       });
@@ -97,7 +109,7 @@ app.post('/api/orders', (req, res) => {
   );
 });
 
-// 2. Захиалгын төлөв шалгах
+// 2. Захиалгын төлөв шалгах - ШИНЭЧЛЭЛТ
 app.get('/api/orders/:orderId', (req, res) => {
   const { orderId } = req.params;
 
@@ -106,23 +118,31 @@ app.get('/api/orders/:orderId', (req, res) => {
     [orderId],
     (err, order) => {
       if (err || !order) {
-        return res.status(404).json({ error: 'Захиалга олдсонгүй' });
+        return res.status(404).json({ 
+          success: false,
+          error: 'Захиалга олдсонгүй' 
+        });
       }
 
+      // ✅ ЧУХАЛ: payment_verified талбарыг заавал буцаах
       res.json({
+        success: true,
         order_id: order.order_id,
         status: order.status,
-        payment_verified: Boolean(order.payment_verified),
-        paid_at: order.paid_at,
+        payment_verified: order.payment_verified || 0, // ✅ Энэ талбар ЗААВАЛ байх ёстой
         name: order.name,
         email: order.email,
-        phone: order.phone
+        phone: order.phone,
+        verified_at: order.verified_at,
+        verified_by: order.verified_by,
+        notes: order.notes,
+        amount: order.amount || 50000
       });
     }
   );
 });
 
-// 3. Файл татах (Төлбөр төлсөн хэрэглэгчид зориулсан)
+// 3. Файл татах - payment_verified шалгах
 app.get('/api/download/:orderId', (req, res) => {
   const { orderId } = req.params;
 
@@ -131,15 +151,20 @@ app.get('/api/download/:orderId', (req, res) => {
     [orderId],
     (err, order) => {
       if (err || !order) {
-        return res.status(403).json({ error: 'Татах эрхгүй байна' });
+        return res.status(403).json({ 
+          success: false,
+          error: 'Татах эрхгүй байна. Админаас зөвшөөрөл аваагүй байна.' 
+        });
       }
 
-      // Файлын замыг энд тохируулна
       const filePath = path.join(__dirname, 'files', 'financial-templates.zip');
       
-      res.download(filePath, 'Хэрэгтэй-Файл-Багц.zip', (err) => {
+      res.download(filePath, `Хэрэгтэй-Файл-${order.order_id}.zip`, (err) => {
         if (err) {
-          res.status(500).json({ error: 'Файл татахад алдаа гарлаа' });
+          res.status(500).json({ 
+            success: false,
+            error: 'Файл татахад алдаа гарлаа' 
+          });
         }
       });
     }
@@ -148,63 +173,22 @@ app.get('/api/download/:orderId', (req, res) => {
 
 // ==================== ADMIN API ====================
 
-// Админ нэвтрэх
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
-
-  db.get(
-    `SELECT * FROM admins WHERE username = ?`,
-    [username],
-    (err, admin) => {
-      if (err || !admin) {
-        return res.status(401).json({ error: 'Хэрэглэгчийн нэр эсвэл нууц үг буруу' });
-      }
-
-      const validPassword = bcrypt.compareSync(password, admin.password_hash);
-      if (!validPassword) {
-        return res.status(401).json({ error: 'Хэрэглэгчийн нэр эсвэл нууц үг буруу' });
-      }
-
-      const token = jwt.sign({ id: admin.id, username: admin.username }, JWT_SECRET, {
-        expiresIn: '24h'
-      });
-
-      res.json({
-        success: true,
-        token,
-        admin: { id: admin.id, username: admin.username }
-      });
-    }
-  );
-});
-
-// Админ эрх шалгах middleware
-const authenticateAdmin = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Нэвтрэх шаардлагатай' });
-  }
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.admin = decoded;
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: 'Токен хүчингүй байна' });
-  }
-};
-
-// Бүх захиалга харах (АДМИН)
-app.get('/api/admin/orders', authenticateAdmin, (req, res) => {
+// 4. Бүх захиалга харах
+app.get('/api/admin/orders', (req, res) => {
   const { status } = req.query;
 
   let query = `SELECT * FROM orders ORDER BY created_at DESC`;
   const params = [];
 
-  if (status) {
-    query = `SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC`;
-    params.push(status);
+  if (status && status !== 'all') {
+    if (status === 'paid') {
+      query = `SELECT * FROM orders WHERE payment_verified = 1 ORDER BY created_at DESC`;
+    } else if (status === 'pending') {
+      query = `SELECT * FROM orders WHERE payment_verified = 0 AND status != 'rejected' ORDER BY created_at DESC`;
+    } else {
+      query = `SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC`;
+      params.push(status);
+    }
   }
 
   db.all(query, params, (err, orders) => {
@@ -216,68 +200,95 @@ app.get('/api/admin/orders', authenticateAdmin, (req, res) => {
   });
 });
 
-// Төлбөр баталгаажуулах (АДМИН)
-app.post('/api/admin/orders/:orderId/verify', authenticateAdmin, (req, res) => {
+// 5. Захиалгыг баталгаажуулах (ADMIN) - ✅ ШИНЭЧЛЭЛТ
+app.post('/api/admin/orders/:orderId/verify', (req, res) => {
   const { orderId } = req.params;
-  const adminUsername = req.admin.username;
+  const { adminName = 'Админ', notes = 'Админаар баталгаажсан' } = req.body;
+
+  console.log(`🔍 Баталгаажуулах гэж байна: ${orderId}`);
 
   db.run(
     `UPDATE orders 
-     SET payment_verified = 1, 
-         status = 'paid', 
-         paid_at = CURRENT_TIMESTAMP,
-         verified_by = ?
+     SET status = 'verified', 
+         payment_verified = 1,
+         verified_at = CURRENT_TIMESTAMP,
+         verified_by = ?,
+         notes = ?
      WHERE order_id = ?`,
-    [adminUsername, orderId],
+    [adminName, notes, orderId],
     function(err) {
       if (err) {
-        return res.status(500).json({ error: 'Баталгаажуулахад алдаа гарлаа' });
+        console.error('❌ Update алдаа:', err);
+        return res.status(500).json({ 
+          success: false,
+          error: 'Баталгаажуулахад алдаа гарлаа' 
+        });
       }
 
       if (this.changes === 0) {
-        return res.status(404).json({ error: 'Захиалга олдсонгүй' });
+        console.error('❌ Захиалга олдсонгүй:', orderId);
+        return res.status(404).json({ 
+          success: false,
+          error: 'Захиалга олдсонгүй' 
+        });
       }
 
-      // И-мэйл илгээх (опциональ)
-      db.get(`SELECT * FROM orders WHERE order_id = ?`, [orderId], (err, order) => {
-        if (order) {
-          console.log(`✅ Төлбөр баталгаажлаа: ${order.email} - ${orderId}`);
-          // TODO: И-мэйл илгээх (nodemailer ашиглана)
-        }
-      });
-
+      console.log(`✅ Амжилттай баталгаажлаа: ${orderId} (${this.changes} өөрчлөлт)`);
+      
       res.json({
         success: true,
-        message: 'Төлбөр амжилттай баталгаажлаа'
+        message: 'Захиалга амжилттай баталгаажлаа'
       });
     }
   );
 });
 
-// Төлбөр татгалзах (АДМИН)
-app.post('/api/admin/orders/:orderId/reject', authenticateAdmin, (req, res) => {
+// 6. Захиалгыг татгалзах
+app.post('/api/admin/orders/:orderId/reject', (req, res) => {
   const { orderId } = req.params;
+  const { reason, adminName = 'Админ' } = req.body;
 
   db.run(
-    `UPDATE orders SET status = 'rejected' WHERE order_id = ?`,
-    [orderId],
+    `UPDATE orders 
+     SET status = 'rejected',
+         payment_verified = 0,
+         verified_at = CURRENT_TIMESTAMP,
+         verified_by = ?,
+         notes = ?
+     WHERE order_id = ?`,
+    [adminName, reason, orderId],
     function(err) {
       if (err) {
-        return res.status(500).json({ error: 'Алдаа гарлаа' });
+        return res.status(500).json({ 
+          success: false,
+          error: 'Татгалзахад алдаа гарлаа' 
+        });
       }
 
-      res.json({ success: true, message: 'Захиалгыг татгалзлаа' });
+      if (this.changes === 0) {
+        return res.status(404).json({ 
+          success: false,
+          error: 'Захиалга олдсонгүй' 
+        });
+      }
+
+      console.log(`❌ Захиалга татгалзлаа: ${orderId}`);
+      
+      res.json({
+        success: true,
+        message: 'Захиалга татгалзлаа'
+      });
     }
   );
 });
 
-// Статистик (АДМИН)
-app.get('/api/admin/stats', authenticateAdmin, (req, res) => {
+// 7. Статистик
+app.get('/api/admin/stats', (req, res) => {
   db.all(
     `SELECT 
       COUNT(*) as total_orders,
       SUM(CASE WHEN payment_verified = 1 THEN 1 ELSE 0 END) as paid_orders,
-      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_orders,
+      SUM(CASE WHEN payment_verified = 0 AND status != 'rejected' THEN 1 ELSE 0 END) as pending_orders,
       SUM(CASE WHEN payment_verified = 1 THEN amount ELSE 0 END) as total_revenue
     FROM orders`,
     [],
@@ -291,50 +302,19 @@ app.get('/api/admin/stats', authenticateAdmin, (req, res) => {
   );
 });
 
-// ==================== WEBHOOK (Банкны API холболт) ====================
+// ==================== SERVER START ====================
 
-// Энэ endpoint-ийг банкны webhook-тэй холбоно
-app.post('/api/webhook/bank-notification', (req, res) => {
-  const { reference, amount, status, transaction_id } = req.body;
-
-  // Банкны webhook шалгах (security)
-  const bankSecret = req.headers['x-bank-secret'];
-  if (bankSecret !== 'your-bank-webhook-secret') {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  if (status === 'success' && amount === 49900) {
-    db.run(
-      `UPDATE orders 
-       SET payment_verified = 1, 
-           status = 'paid', 
-           paid_at = CURRENT_TIMESTAMP,
-           verified_by = 'auto-webhook'
-       WHERE order_id = ?`,
-      [reference],
-      function(err) {
-        if (err || this.changes === 0) {
-          return res.status(404).json({ error: 'Захиалга олдсонгүй' });
-        }
-
-        // И-мэйл илгээх
-        db.get(`SELECT * FROM orders WHERE order_id = ?`, [reference], (err, order) => {
-          if (order) {
-            console.log(`✅ Автомат баталгаажлаа: ${order.email} - ${reference}`);
-            // TODO: И-мэйл илгээх
-          }
-        });
-
-        res.json({ success: true });
-      }
-    );
-  } else {
-    res.status(400).json({ error: 'Төлбөр амжилтгүй' });
-  }
-});
-
-// Server эхлүүлэх
 app.listen(PORT, () => {
-  console.log(`🚀 Server эхэллээ: http://localhost:${PORT}`);
-  console.log(`👤 Админ хандах: username=admin, password=admin123`);
+  console.log(`🚀 Сервер эхэллээ: http://localhost:${PORT}`);
+  console.log(`📊 API эндпоинтууд:`);
+  console.log(`   POST /api/orders - Захиалга үүсгэх`);
+  console.log(`   GET /api/orders/:id - Төлөв шалгах`);
+  console.log(`   GET /api/download/:id - Файл татах`);
+  console.log(`   GET /api/admin/orders - Админ: бүх захиалга`);
+  console.log(`   POST /api/admin/orders/:id/verify - Админ: баталгаажуулах`);
+  console.log(`   POST /api/admin/orders/:id/reject - Админ: татгалзах`);
+  console.log(`\n💰 Төлбөрийн мэдээлэл:`);
+  console.log(`   Данс: 5063 3291 06`);
+  console.log(`   Банк: Хаан Банк`);
+  console.log(`   Дүн: 50,000₮`);
 });
