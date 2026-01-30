@@ -17,25 +17,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// ✅ STATIC FILES - Frontend болон Admin serve хийх
-// Production дээр build хийсэн файлуудыг serve хийнэ
-if (process.env.NODE_ENV === 'production') {
-  // Frontend (public facing)
-  app.use(express.static(path.join(__dirname, '../frontend/dist')));
-  
-  // Admin panel
-  app.use('/admin', express.static(path.join(__dirname, '../admin/dist')));
-  
-  console.log('📦 Static files enabled');
-  console.log('   Frontend:', path.join(__dirname, '../frontend/dist'));
-  console.log('   Admin:', path.join(__dirname, '../admin/dist'));
-}
+// Request logging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
 
 // SQLite Database
-const dbPath = process.env.NODE_ENV === 'production' 
-  ? '/opt/render/project/src/data/database.db'  // Render Persistent Disk
-  : './database.db';
-
+const dbPath = './database.db';
 const db = new sqlite3.Database(dbPath);
 
 // Database Setup
@@ -60,15 +49,6 @@ db.serialize(() => {
       console.error('❌ Хүснэгт үүсгэх алдаа:', err);
     } else {
       console.log('✅ Database бэлэн боллоо:', dbPath);
-      
-      // payment_verified талбар байгаа эсэхийг шалгах
-      db.run(`
-        ALTER TABLE orders ADD COLUMN payment_verified INTEGER DEFAULT 0
-      `, (alterErr) => {
-        if (alterErr && !alterErr.message.includes('duplicate column')) {
-          console.error('⚠️ ALTER алдаа:', alterErr.message);
-        }
-      });
     }
   });
 });
@@ -100,6 +80,8 @@ app.post('/api/orders', (req, res) => {
         });
       }
 
+      console.log(`✅ Шинэ захиалга: ${orderId}`);
+
       res.json({
         success: true,
         order: {
@@ -110,14 +92,7 @@ app.post('/api/orders', (req, res) => {
           email: email.trim(),
           status: 'pending',
           payment_verified: 0,
-          bank_info: {
-            accountNumber: '5063 3291 06',
-            bank: 'Хаан Банк',
-            accountName: 'Түвшинбаяр Энхбаатар',
-            amount: '50,000₮',
-            reference: 'утасны дугаараа',
-            note: 'Гүйлгээний утга дээр ДЭЭРХ УТАСНЫ ДУГААРАА бичнэ үү!'
-          }
+          amount: 50000
         }
       });
     }
@@ -127,17 +102,30 @@ app.post('/api/orders', (req, res) => {
 // 2. Захиалгын төлөв шалгах
 app.get('/api/orders/:orderId', (req, res) => {
   const { orderId } = req.params;
+  
+  console.log(`🔍 Захиалга шалгаж байна: ${orderId}`);
 
   db.get(
     `SELECT * FROM orders WHERE order_id = ?`,
     [orderId],
     (err, order) => {
-      if (err || !order) {
+      if (err) {
+        console.error('❌ Database алдаа:', err);
+        return res.status(500).json({ 
+          success: false,
+          error: 'Алдаа гарлаа' 
+        });
+      }
+
+      if (!order) {
+        console.log(`❌ Захиалга олдсонгүй: ${orderId}`);
         return res.status(404).json({ 
           success: false,
           error: 'Захиалга олдсонгүй' 
         });
       }
+
+      console.log(`✅ Захиалга олдлоо: ${orderId}, verified: ${order.payment_verified}`);
 
       res.json({
         success: true,
@@ -167,7 +155,7 @@ app.get('/api/download/:orderId', (req, res) => {
       if (err || !order) {
         return res.status(403).json({ 
           success: false,
-          error: 'Татах эрхгүй байна. Админаас зөвшөөрөл аваагүй байна.' 
+          error: 'Татах эрхгүй байна. Төлбөр баталгаажаагүй байна.' 
         });
       }
 
@@ -180,6 +168,8 @@ app.get('/api/download/:orderId', (req, res) => {
             success: false,
             error: 'Файл татахад алдаа гарлаа' 
           });
+        } else {
+          console.log(`📥 Файл татагдлаа: ${orderId}`);
         }
       });
     }
@@ -208,9 +198,16 @@ app.get('/api/admin/orders', (req, res) => {
 
   db.all(query, params, (err, orders) => {
     if (err) {
-      return res.status(500).json({ error: 'Алдаа гарлаа' });
+      console.error('❌ Admin orders алдаа:', err);
+      return res.status(500).json({ 
+        success: false,
+        error: 'Алдаа гарлаа' 
+      });
     }
-    res.json({ orders });
+    res.json({ 
+      success: true,
+      orders 
+    });
   });
 });
 
@@ -262,6 +259,8 @@ app.post('/api/admin/orders/:orderId/reject', (req, res) => {
   const { orderId } = req.params;
   const { reason, adminName = 'Админ' } = req.body;
 
+  console.log(`❌ Татгалзаж байна: ${orderId}`);
+
   db.run(
     `UPDATE orders 
      SET status = 'rejected',
@@ -273,6 +272,7 @@ app.post('/api/admin/orders/:orderId/reject', (req, res) => {
     [adminName, reason, orderId],
     function(err) {
       if (err) {
+        console.error('❌ Reject алдаа:', err);
         return res.status(500).json({ 
           success: false,
           error: 'Татгалзахад алдаа гарлаа' 
@@ -286,7 +286,7 @@ app.post('/api/admin/orders/:orderId/reject', (req, res) => {
         });
       }
 
-      console.log(`❌ Захиалга татгалзлаа: ${orderId}`);
+      console.log(`✅ Захиалга татгалзлаа: ${orderId}`);
       
       res.json({
         success: true,
@@ -308,44 +308,84 @@ app.get('/api/admin/stats', (req, res) => {
     [],
     (err, stats) => {
       if (err) {
-        return res.status(500).json({ error: 'Алдаа гарлаа' });
+        return res.status(500).json({ 
+          success: false,
+          error: 'Алдаа гарлаа' 
+        });
       }
-      res.json({ stats: stats[0] });
+      res.json({ 
+        success: true,
+        stats: stats[0] 
+      });
     }
   );
 });
 
-// ✅ FRONTEND ROUTES - React Router support
-// API routes-ын дараа бичих ёстой
-if (process.env.NODE_ENV === 'production') {
-  // Admin panel routes
- 
-
-  // Frontend routes (catch-all)
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+// 8. Admin profile
+app.get('/api/admin/profile', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Admin authenticated'
   });
-}
+});
+
+// 9. Admin users list
+app.get('/api/admin/users', (req, res) => {
+  res.json({
+    success: true,
+    admins: []
+  });
+});
+
+// 10. Add admin user
+app.post('/api/admin/users', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Admin added'
+  });
+});
+
+// ==================== HEALTH CHECK ====================
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
+// ==================== ERROR HANDLING ====================
+app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err);
+  res.status(500).json({
+    success: false,
+    error: 'Серверийн алдаа гарлаа'
+  });
+});
 
 // ==================== SERVER START ====================
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Сервер эхэллээ: http://localhost:${PORT}`);
-  
-  if (process.env.NODE_ENV === 'production') {
-    console.log(`📱 Frontend:  http://localhost:${PORT}`);
-    console.log(`👤 Admin:     http://localhost:${PORT}/admin`);
-  }
+  console.log(`📅 Огноо: ${new Date().toLocaleString('mn-MN')}`);
+  console.log(`🌍 Орчин: ${process.env.NODE_ENV || 'development'}`);
   
   console.log(`\n📊 API эндпоинтууд:`);
+  console.log(`   GET  /health - Health check`);
   console.log(`   POST /api/orders - Захиалга үүсгэх`);
-  console.log(`   GET /api/orders/:id - Төлөв шалгах`);
-  console.log(`   GET /api/download/:id - Файл татах`);
-  console.log(`   GET /api/admin/orders - Админ: захиалгууд`);
+  console.log(`   GET  /api/orders/:id - Төлөв шалгах`);
+  console.log(`   GET  /api/download/:id - Файл татах`);
+  console.log(`   GET  /api/admin/orders - Админ: захиалгууд`);
+  console.log(`   GET  /api/admin/stats - Админ: статистик`);
   console.log(`   POST /api/admin/orders/:id/verify - Админ: баталгаажуулах`);
   console.log(`   POST /api/admin/orders/:id/reject - Админ: татгалзах`);
   console.log(`\n💰 Төлбөрийн мэдээлэл:`);
   console.log(`   Данс: 5063 3291 06`);
   console.log(`   Банк: Хаан Банк`);
   console.log(`   Дүн: 50,000₮\n`);
+  
+  console.log(`💡 Development mode: Frontend болон Admin панел тус тусдаа ажиллаж байна`);
+  console.log(`   Frontend: npm run dev (Vite)`);
+  console.log(`   Admin: npm run dev (Vite)`);
+  console.log(`   Backend: nodemon server.js\n`);
 });
