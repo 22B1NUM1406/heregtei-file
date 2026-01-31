@@ -18,7 +18,15 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://bat-marketing.vercel.app',  // Vercel URL нэмэх
+    'https://your-custom-domain.com' // Custom domain (хэрэв байвал)
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // ==================== SQLite Database ====================
